@@ -14,14 +14,18 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, roc_auc_score, precision_score, recall_score, f1_score, matthews_corrcoef
 from sklearn.tree import DecisionTreeClassifier
 
-df = pd.read_csv("Pokemon.csv")
-df = df.drop(columns=["#", "Name"], errors='ignore')
-df = pd.get_dummies(df, drop_first=True)
+train_df = pd.read_csv("Train_Data.csv")
+test_df = pd.read_csv("Test_Data.csv")
 
-X = df.drop("Legendary", axis=1)
-y = df["Legendary"]
+train_df = train_df.drop(columns=["#", "Name"], errors='ignore')
+test_df = test_df.drop(columns=["#", "Name"], errors='ignore')
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
+X_train = pd.get_dummies(train_df.drop("Legendary", axis=1), drop_first=True)
+X_test = pd.get_dummies(test_df.drop("Legendary", axis=1), drop_first=True)
+X_train, X_test = X_train.align(X_test, join='left', axis=1, fill_value=0)
+
+y_train = train_df["Legendary"].astype(bool)
+y_test = test_df["Legendary"].astype(bool)
 
 model = DecisionTreeClassifier(random_state=42)
 model.fit(X_train, y_train)

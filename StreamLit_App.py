@@ -1,11 +1,13 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
+from pathlib import Path
+from sklearn.linear_model import LogisticRegression
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
     accuracy_score,
     roc_auc_score,
@@ -14,104 +16,171 @@ from sklearn.metrics import (
     f1_score,
     matthews_corrcoef,
     confusion_matrix,
-    classification_report
+    classification_report,
 )
-from sklearn.linear_model import LogisticRegression
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.naive_bayes import GaussianNB
-from sklearn.ensemble import RandomForestClassifier
-import xgboost as xgb
-import seaborn as sns
 import matplotlib.pyplot as plt
+import io
 
-st.title("Pokemon Legendary Classification App")
+try:
+    from xgboost import XGBClassifier
+    XGBOOST_AVAILABLE = True
+except Exception:
+    XGBOOST_AVAILABLE = False
 
-st.write("Upload a CSV dataset (must contain 'Legendary' column as target).")
+BASE = Path(__file__).parent
+DROP_CANDIDATES = ["#", "Name", "ID", "Id", "index"]
 
-uploaded_file = st.file_uploader("Upload Test Dataset (CSV)", type=["csv"])
+st.set_page_config(page_title="Pokemon ML — Evaluator", layout="wide")
+st.title("Pokemon ML — Evaluator")
 
-model_choice = st.selectbox(
-    "Select Model",
-    (
+def load_csv(path: Path):
+    if path is None:
+        return None
+    try:
+        return pd.read_csv(path)
+    except Exception:
+        return None
+
+def build_model(name: str):
+    if name == "Decision_Tree":
+        return DecisionTreeClassifier(random_state=42)
+    if name == "KNN":
+        return KNeighborsClassifier(n_neighbors=5)
+    if name == "Logistic_Regression":
+        return LogisticRegression(max_iter=2000, solver="lbfgs")
+    if name == "naive_bayes_gaussian":
+        return GaussianNB()
+    if name == "random_forest_classifier":
+        return RandomForestClassifier(n_estimators=300, random_state=42)
+    if name == "xgboost_classifier":
+        if not XGBOOST_AVAILABLE:
+            raise RuntimeError("xgboost is not available in the environment")
+        return XGBClassifier(use_label_encoder=False, eval_metric="logloss", random_state=42)
+    raise ValueError(f"Unknown model {name}")
+
+def prepare_xy(df: pd.DataFrame, target: str):
+    df = df.copy()
+    for c in DROP_CANDIDATES:
+        if c in df.columns:
+            df.drop(columns=[c], inplace=True, errors='ignore')
+    if target not in df.columns:
+        raise ValueError("Target column not found in dataframe")
+    X = df.drop(columns=[target])
+    y = df[target]
+    return X, y
+
+def align_and_scale(X_train: pd.DataFrame, X_test: pd.DataFrame, scale: bool = False):
+    # one-hot encode categorical features and align columns
+    X_train_d = pd.get_dummies(X_train)
+    X_test_d = pd.get_dummies(X_test)
+    X_train_d, X_test_d = X_train_d.align(X_test_d, fill_value=0, axis=1)
+    if scale:
+        num_cols = X_train.select_dtypes(include=[np.number]).columns.tolist()
+        num_cols_scaled = [c for c in X_train_d.columns if any(c.startswith(n) for n in num_cols)]
+        if len(num_cols_scaled) > 0:
+            scaler = StandardScaler()
+            scaler.fit(X_train_d[num_cols_scaled])
+            X_train_d[num_cols_scaled] = scaler.transform(X_train_d[num_cols_scaled])
+            X_test_d[num_cols_scaled] = scaler.transform(X_test_d[num_cols_scaled])
+    return X_train_d, X_test_d
+
+def compute_metrics(y_true, y_pred, y_proba=None):
+    metrics = {
+        "Accuracy": accuracy_score(y_true, y_pred),
+        "Precision": precision_score(y_true, y_pred, average="binary" if len(np.unique(y_true))==2 else "macro", zero_division=0),
+        "Recall": recall_score(y_true, y_pred, average="binary" if len(np.unique(y_true))==2 else "macro", zero_division=0),
+        "F1": f1_score(y_true, y_pred, average="binary" if len(np.unique(y_true))==2 else "macro", zero_division=0),
+        "MCC": matthews_corrcoef(y_true, y_pred),
+    }
+    try:
+        if y_proba is not None and len(np.unique(y_true)) == 2:
+            metrics["AUC"] = roc_auc_score(y_true, y_proba[:, 1])
+    except Exception:
+        metrics["AUC"] = np.nan
+    return metrics
+
+def plot_confusion(cm, labels):
+    fig, ax = plt.subplots()
+    im = ax.imshow(cm, cmap="Blues")
+    ax.set_xticks(np.arange(len(labels)))
+    ax.set_yticks(np.arange(len(labels)))
+    ax.set_xticklabels(labels, rotation=45)
+    ax.set_yticklabels(labels)
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            ax.text(j, i, int(cm[i, j]), ha="center", va="center")
+    fig.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight")
+    buf.seek(0)
+    return buf
+
+# UI
+with st.sidebar:
+    st.header("Settings")
+    model_name = st.selectbox("Model", [
         "Decision_Tree",
         "KNN",
         "Logistic_Regression",
         "naive_bayes_gaussian",
         "random_forest_classifier",
-        "xgboost_classifier"
-    )
-)
+        "xgboost_classifier",
+    ])
+    use_presplit = st.checkbox("Use pre-split Train/Test (Train_Data.csv / Test_Data.csv)", value=True)
+    uploaded_test = st.file_uploader("Upload Test CSV (optional)", type=["csv"])
 
-if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
+st.write("## Dataset and Evaluation")
 
-    if "Legendary" not in df.columns:
-        st.error("Dataset must contain 'Legendary' column as target variable.")
-    else:
-        X = df.drop("Legendary", axis=1)
-        y = df["Legendary"].astype(int)
+train_path = BASE / "Train_Data.csv"
+test_path = BASE / "Test_Data.csv"
 
-        categorical_cols = X.select_dtypes(include=["object"]).columns.tolist()
-        numeric_cols = X.select_dtypes(exclude=["object"]).columns.tolist()
+train_df = load_csv(train_path) if use_presplit else load_csv(BASE / "Pokemon.csv")
+test_df = None
+if uploaded_test is not None:
+    try:
+        test_df = pd.read_csv(uploaded_test)
+    except Exception as e:
+        st.error(f"Could not read uploaded test CSV: {e}")
+elif use_presplit:
+    test_df = load_csv(test_path)
 
-        preprocessor = ColumnTransformer(
-            transformers=[
-                ("cat", OneHotEncoder(handle_unknown="ignore"), categorical_cols),
-                ("num", "passthrough", numeric_cols)
-            ]
-        )
+if train_df is None:
+    st.error("Training data not found. Ensure `Train_Data.csv` or `Pokemon.csv` exists.")
+else:
+    st.subheader("Train — preview")
+    st.dataframe(train_df.head())
 
-        if model_choice == "Logistic_Regression":
-            model = LogisticRegression(max_iter=1000)
-        elif model_choice == "Decision_Tree":
-            model = DecisionTreeClassifier()
-        elif model_choice == "KNN":
-            model = KNeighborsClassifier()
-        elif model_choice == "naive_bayes_gaussian":
-            model = GaussianNB()
-        elif model_choice == "random_forest_classifier":
-            model = RandomForestClassifier()
-        elif model_choice == "xgboost_classifier":
-            model = xgb.XGBClassifier(use_label_encoder=False, eval_metric="logloss")
+if test_df is not None:
+    st.subheader("Test — preview")
+    st.dataframe(test_df.head())
 
-        pipeline = Pipeline(steps=[
-            ("preprocessor", preprocessor),
-            ("classifier", model)
-        ])
+target_col = st.text_input("Target column name", value="Legendary")
 
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42, stratify=y
-        )
-
-        pipeline.fit(X_train, y_train)
-        y_pred = pipeline.predict(X_test)
-
-        if hasattr(pipeline.named_steps["classifier"], "predict_proba"):
-            y_prob = pipeline.predict_proba(X_test)[:, 1]
-            auc = roc_auc_score(y_test, y_prob)
+if st.button("Train & Evaluate"):
+    try:
+        X_train, y_train = prepare_xy(train_df, target_col)
+        if test_df is None:
+            st.error("No test dataset available. Upload a test CSV or enable pre-split test file.")
         else:
-            auc = np.nan
+            X_test, y_test = prepare_xy(test_df, target_col)
+            scale = model_name in ["KNN", "Logistic_Regression"]
+            Xtr, Xte = align_and_scale(X_train, X_test, scale=scale)
+            clf = build_model(model_name)
+            clf.fit(Xtr, y_train)
+            y_pred = clf.predict(Xte)
+            y_proba = clf.predict_proba(Xte) if hasattr(clf, "predict_proba") else None
+            metrics = compute_metrics(y_test, y_pred, y_proba)
+            st.subheader("Metrics")
+            st.table(pd.DataFrame([metrics]))
 
-        acc = accuracy_score(y_test, y_pred)
-        precision = precision_score(y_test, y_pred)
-        recall = recall_score(y_test, y_pred)
-        f1 = f1_score(y_test, y_pred)
-        mcc = matthews_corrcoef(y_test, y_pred)
+            st.subheader("Classification report")
+            st.text(classification_report(y_test, y_pred, zero_division=0))
 
-        st.subheader("Evaluation Metrics")
-        st.write(f"Accuracy: {acc:.4f}")
-        st.write(f"AUC: {auc:.4f}")
-        st.write(f"Precision: {precision:.4f}")
-        st.write(f"Recall: {recall:.4f}")
-        st.write(f"F1 Score: {f1:.4f}")
-        st.write(f"MCC: {mcc:.4f}")
+            st.subheader("Confusion matrix")
+            labels = np.unique(y_test)
+            cm = confusion_matrix(y_test, y_pred, labels=labels)
+            buf = plot_confusion(cm, labels)
+            st.image(buf)
+    except Exception as e:
+        st.error(f"Error during train/evaluate: {e}")
 
-        st.subheader("Confusion Matrix")
-        cm = confusion_matrix(y_test, y_pred)
-        fig, ax = plt.subplots()
-        sns.heatmap(cm, annot=True, fmt="d", ax=ax)
-        st.pyplot(fig)
-
-        st.subheader("Classification Report")
-        st.text(classification_report(y_test, y_pred))

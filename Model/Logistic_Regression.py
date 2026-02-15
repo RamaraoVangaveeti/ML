@@ -26,8 +26,20 @@ df = df.drop(columns=["#", "Name"], errors='ignore')
 df = pd.get_dummies(df, drop_first=True)
 
 # Define features and target
-X = df.drop("Legendary", axis=1)
-y = df["Legendary"]
+train_df = pd.read_csv("Train_Data.csv")
+test_df = pd.read_csv("Test_Data.csv")
+
+train_df = train_df.drop(columns=["#", "Name"], errors='ignore')
+test_df = test_df.drop(columns=["#", "Name"], errors='ignore')
+
+X_train = pd.get_dummies(train_df.drop("Legendary", axis=1), drop_first=True)
+X_test = pd.get_dummies(test_df.drop("Legendary", axis=1), drop_first=True)
+
+# align columns
+X_train, X_test = X_train.align(X_test, join='left', axis=1, fill_value=0)
+
+y_train = train_df["Legendary"].astype(bool)
+y_test = test_df["Legendary"].astype(bool)
 
 # Train-test split
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
