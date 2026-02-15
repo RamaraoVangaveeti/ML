@@ -144,12 +144,6 @@ if uploaded_test is not None:
 elif use_presplit:
     test_df = load_csv(test_path)
 
-if train_df is None:
-    st.error("Training data not found. Ensure `Train_Data.csv` or `Pokemon.csv` exists.")
-else:
-    st.subheader("Train — preview")
-    st.dataframe(train_df.head())
-
 if test_df is not None:
     st.subheader("Test — preview")
     st.dataframe(test_df.head())
