@@ -32,7 +32,19 @@ DROP_CANDIDATES = ["#", "Name", "ID", "Id", "index"]
 
 st.set_page_config(page_title="ML — Classification Models", layout="wide")
 st.title("ML — Classification Models")
-st.write("Upload your test dataset to evaluate ML models trained on pokémon data.")
+#st.write("Upload your test dataset to evaluate ML models trained on pokémon data.")
+
+# Download button for Test_Data.csv
+test_data_path = Path(__file__).parent / "Test_Data.csv"
+if test_data_path.exists():
+    with open(test_data_path, 'rb') as f:
+        test_data_bytes = f.read()
+    st.download_button(
+        label="📥 Download Test_Data.csv",
+        data=test_data_bytes,
+        file_name="Test_Data.csv",
+        mime="text/csv"
+    )
 
 def load_csv(path: Path):
     if path is None:
@@ -127,7 +139,8 @@ with st.sidebar:
         "random_forest_classifier",
         "xgboost_classifier",
     ])
-    uploaded_test = st.file_uploader("Upload Test CSV (required)", type=["csv"])
+    
+    uploaded_test = st.file_uploader("Upload Test CSV", type=["csv"])
 
 st.write("## Dataset and Evaluation")
 
@@ -138,6 +151,7 @@ test_df = None
 if train_df is None:
     st.error("Training data file (Train_Data.csv) not found.")
 
+# Load test data from uploaded file
 if uploaded_test is not None:
     try:
         test_df = pd.read_csv(uploaded_test)
