@@ -30,8 +30,9 @@ except Exception:
 BASE = Path(__file__).parent
 DROP_CANDIDATES = ["#", "Name", "ID", "Id", "index"]
 
-st.set_page_config(page_title="Pokemon ML — Evaluator", layout="wide")
-st.title("Pokemon ML — Evaluator")
+st.set_page_config(page_title="ML — Classification Models", layout="wide")
+st.title("ML — Classification Models")
+st.write("Upload your test dataset to evaluate ML models trained on pokémon data.")
 
 def load_csv(path: Path):
     if path is None:
@@ -126,36 +127,33 @@ with st.sidebar:
         "random_forest_classifier",
         "xgboost_classifier",
     ])
-    use_presplit = st.checkbox("Use pre-split Train/Test (Train_Data.csv / Test_Data.csv)", value=True)
-    uploaded_test = st.file_uploader("Upload Test CSV (optional)", type=["csv"])
+    uploaded_test = st.file_uploader("Upload Test CSV (required)", type=["csv"])
 
 st.write("## Dataset and Evaluation")
 
 train_path = BASE / "Train_Data.csv"
-test_path = BASE / "Test_Data.csv"
-
-train_df = load_csv(train_path) if use_presplit else load_csv(BASE / "Pokemon.csv")
+train_df = load_csv(train_path)
 test_df = None
+
+if train_df is None:
+    st.error("Training data file (Train_Data.csv) not found.")
+
 if uploaded_test is not None:
     try:
         test_df = pd.read_csv(uploaded_test)
+        st.subheader("Test Data — preview")
+        st.dataframe(test_df.head())
     except Exception as e:
         st.error(f"Could not read uploaded test CSV: {e}")
-elif use_presplit:
-    test_df = load_csv(test_path)
-
-if test_df is not None:
-    st.subheader("Test — preview")
-    st.dataframe(test_df.head())
 
 target_col = st.text_input("Target column name", value="Legendary")
 
 if st.button("Train & Evaluate"):
     try:
-        X_train, y_train = prepare_xy(train_df, target_col)
-        if test_df is None:
-            st.error("No test dataset available. Upload a test CSV or enable pre-split test file.")
+        if train_df is None or test_df is None:
+            st.error("Please upload a test CSV file.")
         else:
+            X_train, y_train = prepare_xy(train_df, target_col)
             X_test, y_test = prepare_xy(test_df, target_col)
             scale = model_name in ["KNN", "Logistic_Regression"]
             Xtr, Xte = align_and_scale(X_train, X_test, scale=scale)
